@@ -1,0 +1,21 @@
+{
+  "name": "player",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "build": "rm -rf ../static && spago build && npm run build-player && npm run build-remote",
+    "build-player": "spago bundle-app --main Main --to build/index.js && parcel build static/index.html --no-cache --dist-dir ../static --public-url assets",
+    "build-remote": "spago bundle-app --main Remote --to build/remote.js && parcel build static/remote.html --no-cache --dist-dir ../static --public-url assets"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "preact": "^10.15.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.18.0",
+    "parcel": "^2.9.2",
+    "purescript": "^0.15.9",
+    "spago": "^0.21.0"
+  }
+}
