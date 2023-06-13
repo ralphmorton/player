@@ -54,8 +54,8 @@ async fn main() {
                 spa.oneshot(request).await
             })
         )
-        .nest_service("/remote", ServeFile::new("static/remote.html"))
-        .fallback_service(ServeFile::new("static/index.html"))
+        .nest_service("/tv", ServeFile::new("static/index.html"))
+        .fallback_service(ServeFile::new("static/remote.html"))
         .with_state(state);
 
     Server::bind(&"0.0.0.0:3000".parse().unwrap())
