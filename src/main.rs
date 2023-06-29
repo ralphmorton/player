@@ -18,16 +18,29 @@ struct Args {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(tag = "tag")]
 enum Instruction {
-    Stop,
-    Play { path: String },
-    Pause,
-    Resume
+    Idle,
+    Play { path: String, from: Option<f32>, behaviour: Behaviour }
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(tag = "tag")]
+enum Behaviour {
+    Playing,
+    Paused
+}
+
+#[derive(Clone, Deserialize, Serialize)]
+struct PlayerState {
+    path: String,
+    duration: f32,
+    time: f32
 }
 
 #[derive(Clone)]
 struct AppState {
     args: Arc<Args>,
-    instruction: Arc<RwLock<Instruction>>
+    pending_instruction: Arc<RwLock<Option<Instruction>>>,
+    player_state: Arc<RwLock<Option<PlayerState>>>
 }
 
 #[tokio::main]
@@ -35,11 +48,13 @@ async fn main() {
     let args = Args::parse();
     let play = ServeDir::new(String::from(&args.play_root));
     let spa = ServeDir::new("static").not_found_service(ServeFile::new("static/index.html"));
-    let instruction = Arc::new(RwLock::new(Instruction::Stop));
-    let state = AppState { args: Arc::new(args), instruction };
+    let pending_instruction = Arc::new(RwLock::new(None));
+    let player_state = Arc::new(RwLock::new(None));
+    let state = AppState { args: Arc::new(args), pending_instruction, player_state };
 
     let app = Router::new()
         .route("/ls", get(ls))
+        .route("/state", get(poll_player_state))
         .route("/instruction", post(instruct))
         .route("/update", post(update))
         .nest_service(
@@ -71,30 +86,28 @@ async fn ls(State(state): State<AppState>) -> Json<Vec<String>> {
         .into_iter()
         .filter_map(|file| file.ok())
         .filter(|e| e.metadata().unwrap().is_file())
-        .map(|e| format!("{}", e.path().strip_prefix(path).unwrap().display()))
+        .map(|e| format!("/play/{}", e.path().strip_prefix(path).unwrap().display()))
         .collect();
 
     Json(entries)
 }
 
-async fn instruct(State(state): State<AppState>, Json(i): Json<Instruction>) {
-    let mut instruction = state.instruction.write().unwrap();
-
-    match i {
-        Instruction::Play{ path } => {
-            let path = format!("/play/{}", path);
-            *instruction = Instruction::Play { path };
-        },
-        _ => {
-            *instruction = i;
-        }
-    }
-    
+async fn poll_player_state(State(state): State<AppState>) -> Json<Option<PlayerState>> {
+    Json(state.player_state.read().unwrap().clone())
 }
 
-async fn update(State(state): State<AppState>) -> Json<Instruction> {
-    match state.instruction.read() {
-        Ok(instruction) => Json(instruction.clone()),
-        Err(_) => Json(Instruction::Stop)
-    }
+async fn instruct(State(state): State<AppState>, Json(i): Json<Instruction>) {
+    let mut pending_instruction = state.pending_instruction.write().unwrap();
+    *pending_instruction = Some(i);
+}
+
+async fn update(State(state): State<AppState>, Json(p): Json<Option<PlayerState>>) -> Json<Option<Instruction>> {
+    let mut player_state = state.player_state.write().unwrap();
+    *player_state = p.clone();
+
+    let mut pending_instruction = state.pending_instruction.write().unwrap();
+    let i = pending_instruction.clone();
+    *pending_instruction = None;
+
+    Json(i)
 }

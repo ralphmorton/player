@@ -4,7 +4,9 @@ import Prelude hiding (div)
 
 import Control.Monad.Rec.Class (forever)
 import Data.Argonaut.Encode (toJsonString)
+import Data.Array (sort)
 import Data.HTTP.Method (Method(..))
+import Data.Int (floor)
 import Data.Maybe (Maybe(..))
 import Data.Newtype (wrap)
 import Data.Tuple.Nested ((/\))
@@ -13,17 +15,18 @@ import Effect.Aff (Aff, delay, launchAff_)
 import Effect.Class (liftEffect)
 import Fetch (fetch)
 import Fetch.Argonaut.Json (fromJson)
-import Instruction (Instruction(..))
+import Instruction (Behaviour(..), Instruction(..))
 import Muon (Html, Muon, Signal, a, click, div, i, muon, on, state, text, (:=))
+import PlayerState (PlayerState)
 
 type State = {
   files :: Array String,
-  selected :: Maybe String
+  playerState :: Maybe PlayerState
 }
 
 type StateChans = {
   files :: Array String -> Effect Unit,
-  selected :: Maybe String -> Effect Unit
+  playerState :: Maybe PlayerState -> Effect Unit
 }
 
 main :: Effect Unit
@@ -31,31 +34,60 @@ main = muon =<< app
 
 app :: Effect (Signal (Muon Html))
 app = do
-  sig /\ chans <- state { files: [], selected: Nothing }
+  sig /\ chans <- state { files: [], playerState: Nothing }
   list chans
-  pure $ sig <#> \{ files, selected } -> pure $
-    div ["class" := "container"] $
-      case selected of
-        Just path ->
-          [
-            div ["class" := "title"] [text path],
-            div ["class" := "controls"] [
-              a ["href" := "#", on click (const resume)] [
-                i ["class" := "bx bx-play"] []
-              ],
-              a ["href" := "#", on click (const pause)] [
-                i ["class" := "bx bx-pause"] []
-              ],
-              a ["href" := "#", on click (const $ stop chans)] [
-                i ["class" := "bx bx-stop"] []
+  poll chans
+  pure $ sig <#> \{ files, playerState } -> pure $
+    div ["class" := "container pt-5"] [
+      div ["class" := "row"] [
+        div ["class" := "col-12"] $
+          case playerState of
+            Just { path, duration, time } ->
+              [
+                div ["class" := "card"] [
+                  div ["class" := "card-body text-center"] [
+                    div ["class" := "h3 m-0 text-warning"] [text path],
+                    div ["class" := "h3 my-4"] [
+                      a ["class" := "mr-4", "href" := "#", on click (const $ play path $ pure $ max 0.0 (time - 60.0))] [
+                        i ["class" := "bx bx-chevrons-left"] []
+                      ],
+                      a ["class" := "mr-4", "href" := "#", on click (const $ resume path)] [
+                        i ["class" := "bx bx-play"] []
+                      ],
+                      a ["class" := "mr-4", "href" := "#", on click (const $ pause path)] [
+                        i ["class" := "bx bx-pause"] []
+                      ],
+                      a ["class" := "mr-4", "href" := "#", on click (const stop)] [
+                        i ["class" := "bx bx-stop"] []
+                      ],
+                      a ["class" := "mr-4", "href" := "#", on click (const $ play path $ pure $ min duration (time + 60.0))] [
+                        i ["class" := "bx bx-chevrons-right"] []
+                      ]
+                    ],
+                    div ["class" := "progress"] [
+                      div
+                        [
+                          "class" := "progress-bar",
+                          "role" := "progressbar",
+                          "style" := ("width: " <> show (floor $ (time / duration) * 100.0) <> "%;")
+                        ]
+                        []
+                    ]
+                  ]
+                ]
               ]
-            ]
-          ]
-        Nothing ->
-          files <#> \file ->
-            div ["class" := "entry"] [
-              a ["href" := "#", on click (const $ play chans file)] [text file]
-            ]
+            Nothing ->
+              [
+                div ["class" := "card"] [
+                  div ["class" := "card-body"] $
+                    sort files <#> \file ->
+                      div ["class" := "mb-3 p-3 border"] [
+                        a ["href" := "#", on click (const $ play file Nothing)] [text file]
+                      ]
+                ]
+              ]
+      ]
+    ]
 
 ifHtml :: Boolean -> Html -> Html
 ifHtml c h = if c then h else text ""
@@ -66,11 +98,11 @@ ifHtml c h = if c then h else text ""
 
 list :: StateChans -> Effect Unit
 list chans = launchAff_ $ forever do
-  req chans
+  listFiles chans
   delay (wrap 5000.0)
 
-req :: StateChans -> Aff Unit
-req chans = do
+listFiles :: StateChans -> Aff Unit
+listFiles chans = do
   { json } <- fetch "/ls" {
     method: GET,
     headers: {
@@ -81,21 +113,33 @@ req chans = do
   files <- fromJson json
   liftEffect $ chans.files files
 
-play :: StateChans -> String -> Effect Unit
-play chans path = do
-  instruction (Play path)
-  chans.selected (pure path)
+poll :: StateChans -> Effect Unit
+poll chans = launchAff_ $ forever do
+  pollPlayerState chans
+  delay (wrap 250.0)
 
-resume :: Effect Unit
-resume = instruction Resume
+pollPlayerState :: StateChans -> Aff Unit
+pollPlayerState chans = do
+  { json } <- fetch "/state" {
+    method: GET,
+    headers: {
+      "Accept": "application/json",
+      "Content-Type": "application/json"
+    }
+  }
+  liftEffect <<< chans.playerState =<< fromJson json
 
-pause :: Effect Unit
-pause = instruction Pause
+play :: String -> Maybe Number -> Effect Unit
+play path from = instruction (Play path from Playing)
 
-stop :: StateChans -> Effect Unit
-stop chans = do
-  instruction Stop
-  chans.selected Nothing
+resume :: String -> Effect Unit
+resume path = instruction (Play path Nothing Playing)
+
+pause :: String -> Effect Unit
+pause path = instruction (Play path Nothing Paused)
+
+stop :: Effect Unit
+stop = instruction Idle
 
 instruction :: Instruction -> Effect Unit
 instruction i = launchAff_ do

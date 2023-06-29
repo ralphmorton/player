@@ -5,8 +5,11 @@ import Prelude hiding (div)
 import Control.Monad.Error.Class (catchError)
 import Control.Monad.Rec.Class (forever)
 import Data.Argonaut.Encode (toJsonString)
+import Data.Foldable (traverse_)
 import Data.HTTP.Method (Method(..))
 import Data.Newtype (wrap)
+import Data.Maybe (Maybe(..))
+import Data.Nullable (Nullable, toMaybe)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff (Aff, delay, launchAff_)
@@ -14,43 +17,41 @@ import Effect.Class (liftEffect)
 import Effect.Exception (message)
 import Fetch (fetch)
 import Fetch.Argonaut.Json (fromJson)
-import Instruction (Instruction(..))
+import Instruction (Behaviour(..), Instruction(..))
 import Muon (Html, Muon, Prop, Signal, aff, div, el, muon, state, text, (:=))
+import PlayerState (PlayerState)
 
 type State = {
-  path :: String,
-  behaviour :: Behaviour
+  action :: Action
 }
 
 type StateChans = {
-  path :: String -> Effect Unit,
-  behaviour :: Behaviour -> Effect Unit
+  action :: Action -> Effect Unit
 }
 
-data Behaviour
+data Action
   = NetworkError String
-  | Idle
-  | Playing
-  | Paused
+  | Waiting
+  | Video String Behaviour
 
 main :: Effect Unit
 main = muon =<< app
 
 app :: Effect (Signal (Muon Html))
 app = do
-  sig /\ chans <- state { path: "", behaviour: Idle }
+  sig /\ chans <- state { action: Waiting }
   poll chans
-  pure $ sig <#> \{ path, behaviour } -> case behaviour of
-    NetworkError error ->
+  pure $ sig <#> \{ action } -> case action of
+    NetworkError err ->
       pure $
-        div ["class" := "error message"] [text $ "Error: " <> error]
-    Idle ->
+        div ["class" := "error message"] [text err]
+    Waiting ->
       pure $
         div ["class" := "info message"] [text "Waiting..."]
-    Playing ->
-      renderVideo path false
-    Paused ->
-      renderVideo path true
+    Video path behaviour ->
+      renderVideo path case behaviour of
+        Playing -> false
+        Paused -> true
 
 renderVideo :: String -> Boolean -> Muon Html
 renderVideo path paused = do
@@ -84,6 +85,16 @@ pause = liftEffect $ pause_ videoId
 
 foreign import pause_ :: String -> Effect Unit
 
+playerState :: Aff (Maybe PlayerState)
+playerState = toMaybe <$> liftEffect (playerState_ videoId)
+
+foreign import playerState_ :: String -> Effect (Nullable PlayerState)
+
+setCurrentTime :: Number -> Effect Unit
+setCurrentTime = setCurrentTime_ videoId
+
+foreign import setCurrentTime_ :: String -> Number -> Effect Unit
+
 --
 -- Network stuff
 --
@@ -94,24 +105,22 @@ poll chans = launchAff_ $ forever do
   delay (wrap 250.0)
 
 update :: StateChans -> Aff Unit
-update chans = flip catchError (liftEffect <<< chans.behaviour <<< NetworkError <<< message) do
+update chans = flip catchError (liftEffect <<< chans.action <<< NetworkError <<< message) do
+  pState <- playerState
   { json } <- fetch "/update" {
     method: POST,
-    body: toJsonString unit,
+    body: toJsonString pState,
     headers: {
       "Accept": "application/json",
       "Content-Type": "application/json"
     }
   }
   rsp <- fromJson json
-  liftEffect $ case rsp of
-    Stop -> do
-      chans.path ""
-      chans.behaviour Idle
-    Play path -> do
-      chans.path path
-      chans.behaviour Playing
-    Pause ->
-      chans.behaviour Paused
-    Resume ->
-      chans.behaviour Playing
+  liftEffect case rsp of
+    Just Idle ->
+      chans.action Waiting
+    Just (Play path from behaviour) -> do
+      chans.action (Video path behaviour)
+      traverse_ setCurrentTime from
+    Nothing ->
+      pure unit

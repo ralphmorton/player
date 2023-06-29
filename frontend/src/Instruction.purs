@@ -1,5 +1,6 @@
 module Instruction (
-  Instruction(..)
+  Instruction(..),
+  Behaviour(..)
 ) where
 
 import Prelude
@@ -10,36 +11,50 @@ import Data.Argonaut.Decode.Class (class DecodeJson)
 import Data.Argonaut.Decode.Error (JsonDecodeError(..))
 import Data.Argonaut.Encode (encodeJson)
 import Data.Argonaut.Encode.Class (class EncodeJson)
+import Data.Maybe (Maybe)
 
 data Instruction
-  = Stop
-  | Play String
-  | Pause
-  | Resume
+  = Idle
+  | Play String (Maybe Number) Behaviour
 
 instance DecodeJson Instruction where
   decodeJson j = do
     o <- decodeJson j
     tag <- o .: "tag"
     case tag of
-      "Stop" ->
-        pure Stop
+      "Idle" ->
+        pure Idle
       "Play" ->
-        Play <$> o .: "path"
-      "Pause" ->
-        pure Pause
-      "Resume" ->
-        pure Resume
+        Play <$> o .: "path" <*> o .: "from" <*> o .: "behaviour"
       _ ->
         throwError (UnexpectedValue $ encodeJson tag)
 
 instance EncodeJson Instruction where
   encodeJson = case _ of
-    Stop ->
-      encodeJson { tag: "Stop" }
-    Play path ->
-      encodeJson { tag: "Play", path }
-    Pause ->
-      encodeJson { tag: "Pause" }
-    Resume ->
-      encodeJson { tag: "Resume" }
+    Idle ->
+      encodeJson { tag: "Idle" }
+    Play path from behaviour ->
+      encodeJson { tag: "Play", path, from, behaviour }
+
+data Behaviour
+  = Playing
+  | Paused
+
+instance DecodeJson Behaviour where
+  decodeJson j = do
+    o <- decodeJson j
+    tag <- o .: "tag"
+    case tag of
+      "Playing" ->
+        pure Playing
+      "Paused" ->
+        pure Paused
+      _ ->
+        throwError (UnexpectedValue $ encodeJson tag)
+
+instance EncodeJson Behaviour where
+  encodeJson = case _ of
+    Playing ->
+      encodeJson { tag: "Playing" }
+    Paused ->
+      encodeJson { tag: "Paused" }
