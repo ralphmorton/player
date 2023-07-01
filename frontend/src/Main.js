@@ -6,8 +6,10 @@ export const playerState_ = (id) => () => {
   const video = document.getElementById(id)
 
   if (video && video.children[0] && video.children[0].src && video.duration && video.currentTime) {
+    const url = video.children[0].src
+
     return {
-      path: video.children[0].src,
+      path: url.substr(url.lastIndexOf("/play/") + 6),
       duration: video.duration,
       time: video.currentTime
     }
