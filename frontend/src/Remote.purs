@@ -4,11 +4,13 @@ import Prelude hiding (div)
 
 import Control.Monad.Rec.Class (forever)
 import Data.Argonaut.Encode (toJsonString)
-import Data.Array (sort)
+import Data.Array (mapMaybe, nub, sort, uncons)
+import Data.Either (Either(..))
 import Data.HTTP.Method (Method(..))
 import Data.Int (floor)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (wrap)
+import Data.String (drop, lastIndexOf, length, split, stripPrefix, take)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff (Aff, delay, launchAff_)
@@ -21,11 +23,13 @@ import PlayerState (PlayerState)
 
 type State = {
   files :: Array String,
+  prefix :: String,
   playerState :: Maybe PlayerState
 }
 
 type StateChans = {
   files :: Array String -> Effect Unit,
+  prefix :: String -> Effect Unit,
   playerState :: Maybe PlayerState -> Effect Unit
 }
 
@@ -34,10 +38,10 @@ main = muon =<< app
 
 app :: Effect (Signal (Muon Html))
 app = do
-  sig /\ chans <- state { files: [], playerState: Nothing }
+  sig /\ chans <- state { files: [], prefix: "", playerState: Nothing }
   list chans
   poll chans
-  pure $ sig <#> \{ files, playerState } -> pure $
+  pure $ sig <#> \{ files, prefix, playerState } -> pure $
     div ["class" := "container pt-5"] [
       div ["class" := "row"] [
         div ["class" := "col-12"] $
@@ -46,22 +50,22 @@ app = do
               [
                 div ["class" := "card"] [
                   div ["class" := "card-body text-center"] [
-                    div ["class" := "h3 m-0 text-warning"] [text path],
-                    div ["class" := "h3 my-4"] [
+                    div ["class" := "h3 m-0 text-warning"] [text $ fileName path],
+                    div ["class" := "my-4"] [
                       a ["class" := "mr-4", "href" := "#", on click (const $ play path $ pure $ max 0.0 (time - 60.0))] [
-                        i ["class" := "bx bx-chevrons-left"] []
+                        i ["class" := "h1 bx bx-chevrons-left"] []
                       ],
                       a ["class" := "mr-4", "href" := "#", on click (const $ resume path)] [
-                        i ["class" := "bx bx-play"] []
+                        i ["class" := "h1 bx bx-play"] []
                       ],
                       a ["class" := "mr-4", "href" := "#", on click (const $ pause path)] [
-                        i ["class" := "bx bx-pause"] []
+                        i ["class" := "h1 bx bx-pause"] []
                       ],
                       a ["class" := "mr-4", "href" := "#", on click (const stop)] [
-                        i ["class" := "bx bx-stop"] []
+                        i ["class" := "h1 bx bx-stop"] []
                       ],
                       a ["class" := "mr-4", "href" := "#", on click (const $ play path $ pure $ min duration (time + 60.0))] [
-                        i ["class" := "bx bx-chevrons-right"] []
+                        i ["class" := "h1 bx bx-chevrons-right"] []
                       ]
                     ],
                     div ["class" := "progress"] [
@@ -79,11 +83,25 @@ app = do
             Nothing ->
               [
                 div ["class" := "card"] [
-                  div ["class" := "card-body"] $
-                    sort files <#> \file ->
-                      div ["class" := "mb-3 p-3 border"] [
-                        a ["href" := "#", on click (const $ play file Nothing)] [text file]
-                      ]
+                  div ["class" := "card-body"] [
+                    ifHtml (prefix /= "") $
+                      div ["class" := "mb-3 p-3"] [
+                        a ["href" := "#", on click (const $ chans.prefix $ parentDir prefix)] [
+                          i ["class" := "bx bx-arrow-back mr-2"] [],
+                          text prefix
+                        ]
+                      ],
+                    div [] $
+                      getFileList prefix files <#> case _ of
+                        Left { name, path } ->
+                          div ["class" := "mb-3 p-3 border"] [
+                            a ["href" := "#", on click (const $ play path Nothing)] [text name]
+                          ]
+                        Right dir ->
+                          div ["class" := "mb-3 p-3 border"] [
+                            a ["href" := "#", on click (const $ chans.prefix $ childDir prefix dir)] [text dir]
+                          ]
+                  ]
                 ]
               ]
       ]
@@ -91,6 +109,34 @@ app = do
 
 ifHtml :: Boolean -> Html -> Html
 ifHtml c h = if c then h else text ""
+
+getFileList :: String -> Array String -> Array (Either { name :: String, path :: String } String)
+getFileList prefix = sort <<< nub <<< mapMaybe toDesc
+  where
+  toDesc path = do
+    suffix <- uncons <<< split (wrap "/") =<< stripPrefix (wrap prefix) path
+    pure case uncons suffix.tail of
+      Nothing ->
+        Left { name: suffix.head, path }
+      Just _ ->
+        Right suffix.head
+
+childDir :: String -> String -> String
+childDir current child = case current of
+  "" ->
+    child <> "/"
+  _ ->
+    current <> child <> "/"
+
+parentDir :: String -> String
+parentDir dir = fromMaybe "" do
+  ix <- lastIndexOf (wrap "/") $ take (length dir - 1) dir
+  pure $ take ix dir
+
+fileName :: String -> String
+fileName path = fromMaybe path do
+  ix <- lastIndexOf (wrap "/") path
+  pure $ drop (ix + 1) path
 
 --
 -- Network stuff

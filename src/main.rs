@@ -86,7 +86,7 @@ async fn ls(State(state): State<AppState>) -> Json<Vec<String>> {
         .into_iter()
         .filter_map(|file| file.ok())
         .filter(|e| e.metadata().unwrap().is_file())
-        .map(|e| format!("/play/{}", e.path().strip_prefix(path).unwrap().display()))
+        .map(|e| format!("{}", e.path().strip_prefix(path).unwrap().display()))
         .collect();
 
     Json(entries)

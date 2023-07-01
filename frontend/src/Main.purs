@@ -120,7 +120,7 @@ update chans = flip catchError (liftEffect <<< chans.action <<< NetworkError <<<
     Just Idle ->
       chans.action Waiting
     Just (Play path from behaviour) -> do
-      chans.action (Video path behaviour)
+      chans.action (Video ("/play/" <> path) behaviour)
       traverse_ setCurrentTime from
     Nothing ->
       pure unit
