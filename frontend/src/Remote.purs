@@ -18,7 +18,7 @@ import Effect.Class (liftEffect)
 import Fetch (fetch)
 import Fetch.Argonaut.Json (fromJson)
 import Instruction (Behaviour(..), Instruction(..))
-import Muon (Html, Muon, Signal, a, click, div, i, muon, on, state, text, (:=))
+import Muon (Html, Muon, Signal, a, button, click, div, i, muon, on, state, text, (:=))
 import PlayerState (PlayerState)
 
 type State = {
@@ -52,20 +52,20 @@ app = do
                   div ["class" := "card-body text-center"] [
                     div ["class" := "h3 m-0 text-warning"] [text $ fileName path],
                     div ["class" := "my-4"] [
-                      a ["class" := "mr-4", "href" := "#", on click (const $ play path $ pure $ max 0.0 (time - 60.0))] [
-                        i ["class" := "h1 bx bx-chevrons-left"] []
+                      button ["class" := "btn btn-primary m-2", on click (const $ play path $ pure $ max 0.0 (time - 60.0))] [
+                        i ["class" := "h1 m-0 bx bx-chevrons-left"] []
                       ],
-                      a ["class" := "mr-4", "href" := "#", on click (const $ resume path)] [
-                        i ["class" := "h1 bx bx-play"] []
+                      button ["class" := "btn btn-primary m-2", on click (const $ resume path)] [
+                        i ["class" := "h1 m-0 bx bx-play"] []
                       ],
-                      a ["class" := "mr-4", "href" := "#", on click (const $ pause path)] [
-                        i ["class" := "h1 bx bx-pause"] []
+                      button ["class" := "btn btn-primary m-2", on click (const $ pause path)] [
+                        i ["class" := "h1 m-0 bx bx-pause"] []
                       ],
-                      a ["class" := "mr-4", "href" := "#", on click (const stop)] [
-                        i ["class" := "h1 bx bx-stop"] []
+                      button ["class" := "btn btn-primary m-2", on click (const stop)] [
+                        i ["class" := "h1 m-0 bx bx-stop"] []
                       ],
-                      a ["class" := "mr-4", "href" := "#", on click (const $ play path $ pure $ min duration (time + 60.0))] [
-                        i ["class" := "h1 bx bx-chevrons-right"] []
+                      button ["class" := "btn btn-primary", on click (const $ play path $ pure $ min duration (time + 60.0))] [
+                        i ["class" := "h1 m-0 bx bx-chevrons-right"] []
                       ]
                     ],
                     div ["class" := "progress"] [
