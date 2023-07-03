@@ -4,13 +4,13 @@ import Prelude hiding (div)
 
 import Control.Monad.Rec.Class (forever)
 import Data.Argonaut.Encode (toJsonString)
-import Data.Array (mapMaybe, nub, sort, uncons)
+import Data.Array (length, mapMaybe, nub, null, sort, take, uncons)
 import Data.Either (Either(..))
 import Data.HTTP.Method (Method(..))
 import Data.Int (floor)
 import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Newtype (wrap)
-import Data.String (drop, lastIndexOf, length, split, stripPrefix, take)
+import Data.String (drop, joinWith, lastIndexOf, split, stripPrefix)
 import Data.Tuple.Nested ((/\))
 import Effect (Effect)
 import Effect.Aff (Aff, delay, launchAff_)
@@ -23,13 +23,13 @@ import PlayerState (PlayerState)
 
 type State = {
   files :: Array String,
-  prefix :: String,
+  prefix :: Array String,
   playerState :: Maybe PlayerState
 }
 
 type StateChans = {
   files :: Array String -> Effect Unit,
-  prefix :: String -> Effect Unit,
+  prefix :: Array String -> Effect Unit,
   playerState :: Maybe PlayerState -> Effect Unit
 }
 
@@ -38,7 +38,7 @@ main = muon =<< app
 
 app :: Effect (Signal (Muon Html))
 app = do
-  sig /\ chans <- state { files: [], prefix: "", playerState: Nothing }
+  sig /\ chans <- state { files: [], prefix: [], playerState: Nothing }
   list chans
   poll chans
   pure $ sig <#> \{ files, prefix, playerState } -> pure $
@@ -84,11 +84,11 @@ app = do
               [
                 div ["class" := "card"] [
                   div ["class" := "card-body"] [
-                    ifHtml (prefix /= "") $
+                    ifHtml (not null prefix) $
                       div ["class" := "mb-3 p-3"] [
                         a ["href" := "#", on click (const $ chans.prefix $ parentDir prefix)] [
                           i ["class" := "bx bx-arrow-back mr-2"] [],
-                          text prefix
+                          text (joinWith "/" prefix)
                         ]
                       ],
                     div [] $
@@ -110,28 +110,29 @@ app = do
 ifHtml :: Boolean -> Html -> Html
 ifHtml c h = if c then h else text ""
 
-getFileList :: String -> Array String -> Array (Either { name :: String, path :: String } String)
+getFileList :: Array String -> Array String -> Array (Either { name :: String, path :: String } String)
 getFileList prefix = sort <<< nub <<< mapMaybe toDesc
   where
   toDesc path = do
-    suffix <- uncons <<< split (wrap "/") =<< stripPrefix (wrap prefix) path
+    suffix <- uncons <<< split (wrap "/") =<< stripPrefix (wrap $ prefixPath prefix) path
     pure case uncons suffix.tail of
       Nothing ->
         Left { name: suffix.head, path }
       Just _ ->
         Right suffix.head
 
-childDir :: String -> String -> String
-childDir current child = case current of
-  "" ->
-    child <> "/"
-  _ ->
-    current <> child <> "/"
+prefixPath :: Array String -> String
+prefixPath = case _ of
+  [] ->
+    ""
+  path ->
+    joinWith "/" path <> "/"
 
-parentDir :: String -> String
-parentDir dir = fromMaybe "" do
-  ix <- lastIndexOf (wrap "/") $ take (length dir - 1) dir
-  pure $ take ix dir
+childDir :: Array String -> String -> Array String
+childDir current child = current <> [child]
+
+parentDir :: Array String -> Array String
+parentDir dir = take (length dir - 1) dir
 
 fileName :: String -> String
 fileName path = fromMaybe path do

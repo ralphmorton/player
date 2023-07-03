@@ -60,14 +60,11 @@ renderVideo path paused = do
     div ["class" := "wrapper"] [
       video
         ["id" := videoId, "class" := "vid", "autoplay" := "true", "key" := path]
-        [source path]
+        [el "source" ["src" := ("/play/" <> path), "meta-path" := path] []]
     ]
 
 video :: Array Prop -> Array Html -> Html
 video = el "video"
-
-source :: String -> Html
-source src = el "source" ["src" := src] []
 
 videoId :: String
 videoId = "vid"
@@ -120,7 +117,7 @@ update chans = flip catchError (liftEffect <<< chans.action <<< NetworkError <<<
     Just Idle ->
       chans.action Waiting
     Just (Play path from behaviour) -> do
-      chans.action (Video ("/play/" <> path) behaviour)
+      chans.action (Video path behaviour)
       traverse_ setCurrentTime from
     Nothing ->
       pure unit
