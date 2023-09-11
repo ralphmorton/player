@@ -1,113 +1,119 @@
-use axum::{Router, Server};
-use axum::body::Body;
-use axum::extract::{Json, State};
-use axum::http::Request;
-use axum::routing::{get, post};
-use clap::Parser;
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
-use tower::ServiceExt;
-use tower_http::services::{ServeDir, ServeFile};
+use cfg_if::cfg_if;
 
-#[derive(Parser)]
-struct Args {
-    #[arg(long = "play")]
-    play_root: String
-}
+cfg_if! {
+    if #[cfg(feature = "ssr")] {
+        //
+        //
+        //
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(tag = "tag")]
-enum Instruction {
-    Idle,
-    Play { path: String, from: Option<f32>, behaviour: Behaviour }
-}
+        use axum::{
+            response::{Response, IntoResponse},
+            routing::get,
+            extract::{FromRef, Path, State, RawQuery},
+            http::{Request, header::HeaderMap},
+            body::Body as AxumBody,
+            Router
+        };
+        use clap::Parser;
+        use leptos::*;
+        use leptos_axum::{generate_route_list, handle_server_fns_with_context, LeptosRoutes};
+        use player::app::*;
+        use player::files::file_handler;
+        use player::player::{Instruction, MediaRoot, PlayerState};
+        use std::sync::{Arc, RwLock};
+        use tower::ServiceExt;
+        use tower_http::services::ServeDir;
 
-#[derive(Clone, Deserialize, Serialize)]
-#[serde(tag = "tag")]
-enum Behaviour {
-    Playing,
-    Paused
-}
+        #[derive(Clone, Parser)]
+        struct Args {
+            #[arg(long = "root", default_value = "dev-media")]
+            media_root: String
+        }
+        
+        #[derive(Clone, FromRef)]
+        struct AppState {
+            args: Args,
+            leptos: LeptosOptions,
+            player: Arc<RwLock<PlayerState>>,
+            instruction: Arc<RwLock<Option<Instruction>>>
+        }
+        
+        #[tokio::main]
+        async fn main() {
+            simple_logger::init_with_level(log::Level::Warn).expect("couldn't initialize logging");
 
-#[derive(Clone, Deserialize, Serialize)]
-struct PlayerState {
-    path: String,
-    duration: f32,
-    time: f32
-}
+            let args = Args::parse();
+        
+            let conf = get_configuration(None).await.unwrap();
+            let leptos_options = conf.leptos_options;
+            let addr = leptos_options.site_addr;
+            let routes = generate_route_list(|cx| view! { cx, <App/> }).await;
+            let media_server =  ServeDir::new(String::from(&args.media_root));
+        
+            let app_state = AppState {
+                args,
+                leptos: leptos_options,
+                player: Arc::new(RwLock::new(PlayerState::Idle)),
+                instruction: Arc::new(RwLock::new(None))
+            };
+        
+            let app = Router::new()
+                .route("/api/*fn_name", get(server_fn_handler).post(server_fn_handler))
+                .leptos_routes_with_handler(routes, get(leptos_routes_handler))
+                .nest_service(
+                    "/play",
+                    get(move |request| media_server.oneshot(request))
+                )
+                .fallback(file_handler)
+                .with_state(app_state);
+        
+            axum::Server::bind(&addr)
+                .serve(app.into_make_service())
+                .await
+                .unwrap();
+        }
+        
+        async fn server_fn_handler(
+            State(app_state): State<AppState>,
+            path: Path<String>,
+            headers: HeaderMap,
+            raw_query: RawQuery,
+            request: Request<AxumBody>
+        ) -> impl IntoResponse {
+            handle_server_fns_with_context(
+                path,
+                headers,
+                raw_query,
+                move |cx| {
+                    provide_context(cx, MediaRoot(app_state.args.media_root.clone()));
+                    provide_context(cx, app_state.player.clone());
+                    provide_context(cx, app_state.instruction.clone());
+                },
+                request
+            ).await
+        }
+        
+        async fn leptos_routes_handler(
+            State(app_state): State<AppState>,
+            req: Request<AxumBody>
+        ) -> Response {
+            let handler = leptos_axum::render_app_to_stream_with_context(
+                app_state.leptos.clone(),
+                move |cx| {
+                    provide_context(cx, MediaRoot(app_state.args.media_root.clone()));
+                    provide_context(cx, app_state.player.clone());
+                    provide_context(cx, app_state.instruction.clone());
+                },
+                |cx| view! { cx, <App/> }
+            );
+        
+            handler(req).await.into_response()
+        }
 
-#[derive(Clone)]
-struct AppState {
-    args: Arc<Args>,
-    pending_instruction: Arc<RwLock<Option<Instruction>>>,
-    player_state: Arc<RwLock<Option<PlayerState>>>
-}
-
-#[tokio::main]
-async fn main() {
-    let args = Args::parse();
-    let play = ServeDir::new(String::from(&args.play_root));
-    let spa = ServeDir::new("static").not_found_service(ServeFile::new("static/index.html"));
-    let pending_instruction = Arc::new(RwLock::new(None));
-    let player_state = Arc::new(RwLock::new(None));
-    let state = AppState { args: Arc::new(args), pending_instruction, player_state };
-
-    let app = Router::new()
-        .route("/ls", get(ls))
-        .route("/state", get(poll_player_state))
-        .route("/instruction", post(instruct))
-        .route("/update", post(update))
-        .nest_service(
-            "/play",
-            get(move |request: Request<Body>| async {
-                play.oneshot(request).await
-            })
-        )
-        .nest_service(
-            "/assets",
-            get(move |request: Request<Body>| async {
-                spa.oneshot(request).await
-            })
-        )
-        .nest_service("/tv", ServeFile::new("static/index.html"))
-        .fallback_service(ServeFile::new("static/remote.html"))
-        .with_state(state);
-
-    Server::bind(&"0.0.0.0:3000".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
-}
-
-async fn ls(State(state): State<AppState>) -> Json<Vec<String>> {
-    let path = std::path::Path::new(&state.args.play_root);
-
-    let entries = walkdir::WalkDir::new(&path)
-        .into_iter()
-        .filter_map(|file| file.ok())
-        .filter(|e| e.metadata().unwrap().is_file())
-        .map(|e| format!("{}", e.path().strip_prefix(path).unwrap().display()))
-        .collect();
-
-    Json(entries)
-}
-
-async fn poll_player_state(State(state): State<AppState>) -> Json<Option<PlayerState>> {
-    Json(state.player_state.read().unwrap().clone())
-}
-
-async fn instruct(State(state): State<AppState>, Json(i): Json<Instruction>) {
-    let mut pending_instruction = state.pending_instruction.write().unwrap();
-    *pending_instruction = Some(i);
-}
-
-async fn update(State(state): State<AppState>, Json(p): Json<Option<PlayerState>>) -> Json<Option<Instruction>> {
-    let mut player_state = state.player_state.write().unwrap();
-    *player_state = p.clone();
-
-    let mut pending_instruction = state.pending_instruction.write().unwrap();
-    let i = pending_instruction.clone();
-    *pending_instruction = None;
-
-    Json(i)
+        //
+        //
+        //
+    } else {
+        fn main() {}
+    }
 }

@@ -1,0 +1,17 @@
+.video-wrapper {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.video {
+  background-size: contain;
+  background-position: center center;
+  background-color: black;
+  position: fixed;
+  object-fit: cover;
+  width: 100%;
+  height: 100%;
+}
