@@ -18,13 +18,6 @@ pub async fn list_media(cx: Scope) -> Result<Vec<String>, ServerFnError> {
     Ok(entries)
 }
 
-#[server(FetchPlayerState, "/api")]
-pub async fn fetch_player_state(cx: Scope) -> Result<PlayerState, ServerFnError> {
-    let player_state = expect_context::<Arc<RwLock<PlayerState>>>(cx).read()?.clone();
-
-    Ok(player_state)
-}
-
 #[server(Instruct, "/api")]
 pub async fn instruct(cx: Scope, i: Instruction) -> Result<(), ServerFnError> {
     let instruction = expect_context::<Arc<RwLock<Option<Instruction>>>>(cx);

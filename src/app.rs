@@ -8,6 +8,7 @@ use leptos_router::*;
 #[component]
 pub fn App(cx: Scope) -> impl IntoView {
     provide_meta_context(cx);
+    leptos_server_signal::provide_websocket(cx, "ws://localhost:3000/ws").unwrap();
 
     view! {
         cx,

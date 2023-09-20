@@ -59,6 +59,7 @@ cfg_if! {
         
             let app = Router::new()
                 .route("/api/*fn_name", get(server_fn_handler).post(server_fn_handler))
+                .route("/ws", get(websocket))
                 .leptos_routes_with_handler(routes, get(leptos_routes_handler))
                 .nest_service(
                     "/play",
@@ -108,6 +109,28 @@ cfg_if! {
             );
         
             handler(req).await.into_response()
+        }
+
+        async fn websocket(State(state) : State<AppState>, ws: axum::extract::WebSocketUpgrade) -> axum::response::Response {
+            ws.on_upgrade(|socket| handle_socket(state, socket))
+        }
+
+        async fn handle_socket(state: AppState, mut socket: axum::extract::ws::WebSocket) {
+            let mut signal = leptos_server_signal::ServerSignal::<PlayerState>::new("player_state").unwrap();
+        
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+                let player_state = state.player.read().unwrap().clone();
+
+                let result = signal
+                    .with(&mut socket, |state| *state = player_state)
+                    .await;
+
+                if result.is_err() {
+                    break;
+                }
+            }
         }
 
         //

@@ -9,22 +9,11 @@ use crate::remote::browse::Browse;
 use crate::remote::fns::*;
 use crate::remote::media::Media;
 use leptos::*;
+use leptos_server_signal::create_server_signal;
 
 #[component]
 pub fn Remote(cx: Scope) -> impl IntoView {
-    #[allow(unused_variables)]
-    let (heartbeat, tick) = create_signal(cx, 0);
-
-    let player_state_res = create_resource(
-        cx,
-        heartbeat,
-        move |_| fetch_player_state(cx)
-    );
-
-    let player_state = create_memo(
-        cx,
-        move |_| player_state_res.read(cx)
-    );
+    let player_state = create_server_signal::<PlayerState>(cx, "player_state");
 
     // Split out to allow controls to minimize control re-renders
 
@@ -32,7 +21,7 @@ pub fn Remote(cx: Scope) -> impl IntoView {
         cx,
         move |_| {
             match player_state.get() {
-                Some(Ok(PlayerState::Media(_))) => true,
+                PlayerState::Media(_) => true,
                 _ => false
             }
         }
@@ -42,18 +31,10 @@ pub fn Remote(cx: Scope) -> impl IntoView {
         cx,
         move |_| {
             match player_state.get() {
-                Some(Ok(PlayerState::Media(state))) => Some(state),
+                PlayerState::Media(state) => Some(state),
                 _ => None
             }
         }
-    );
-
-    #[cfg(not(feature = "ssr"))]
-    set_interval(
-        move || {
-            tick.update(|c| *c += 1);
-        },
-        std::time::Duration::from_millis(100)
     );
 
     let media = create_resource(
@@ -67,24 +48,19 @@ pub fn Remote(cx: Scope) -> impl IntoView {
             <Transition fallback=|| ()>
                 {move || {
                     if is_playing.get() {
-                        Some(view! { cx, <Media state=media_state/> }.into_view(cx))
+                        view! { cx, <Media state=media_state/> }.into_view(cx)
                     } else {
-                        player_state.get().map(|result| {
-                            match result {
-                                Err(_) => view! { cx, <DisplayError error="Failed to fetch player state"/> },
-                                Ok(_) => match media.read(cx) {
-                                    None => {
-                                        view! { cx, <Loading/> }.into_view(cx)
-                                    },
-                                    Some(Err(_)) => {
-                                        view! { cx, <DisplayError error="Failed to load media library"/> }.into_view(cx)
-                                    },
-                                    Some(Ok(files)) => {
-                                        view! { cx, <Browse media_files=files/> }.into_view(cx)
-                                    }
-                                }
+                        match media.read(cx) {
+                            None => {
+                                view! { cx, <Loading/> }.into_view(cx)
+                            },
+                            Some(Err(_)) => {
+                                view! { cx, <DisplayError error="Failed to load media library"/> }.into_view(cx)
+                            },
+                            Some(Ok(files)) => {
+                                view! { cx, <Browse media_files=files/> }.into_view(cx)
                             }
-                        })
+                        }
                     }
                 }}
             </Transition>

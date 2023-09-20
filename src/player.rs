@@ -9,6 +9,12 @@ pub enum PlayerState {
     Media(MediaState)
 }
 
+impl Default for PlayerState {
+    fn default() -> Self {
+        Self::Idle
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum MediaState {
     Paused(String, f64, f64),
